@@ -32,14 +32,20 @@ async def buscar_con_ia(pregunta: str):
     lista = "\n".join([f"ID {d['id']}: {d['titulo']}" for d in KB])
     prompt = f"Tengo estos documentos:\n{lista}\n\nEl usuario pregunta: \"{pregunta}\"\n\nResponde SOLO con el número ID del documento más relevante. Si ninguno aplica responde 0."
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}"
-    async with httpx.AsyncClient() as client:
-        r = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=15)
-        data = r.json()
-        texto = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        m = re.search(r"\d+", texto)
-        if m:
-            doc_id = int(m.group())
-            return next((d for d in KB if d["id"] == doc_id), None)
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=15)
+            data = r.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return None
+            texto = candidates[0]["content"]["parts"][0]["text"].strip()
+            m = re.search(r"\d+", texto)
+            if m:
+                doc_id = int(m.group())
+                return next((d for d in KB if d["id"] == doc_id), None)
+    except Exception:
+        return None
     return None
 
 async def buscar(pregunta: str):
@@ -62,22 +68,25 @@ def root():
 
 @app.post("/webhook")
 async def webhook(req: Request):
-    data = await req.json()
-    if "message" not in data:
-        return {"ok": True}
-    msg = data["message"]
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "").strip()
-    if not text:
-        return {"ok": True}
-    if text in ["/start", "/inicio"]:
-        await send_message(chat_id, "👋 ¡Hola! Soy el <b>Asistente Mezontle</b>.\n\nHazme cualquier pregunta y buscaré el documento correcto para ti.\n\nPuedes preguntar sobre:\n📋 Mapeos · Directorio · Correos RDC\n🗺 Croquis · Organigrama · Carta Ánimas")
-        return {"ok": True}
-    await send_typing(chat_id)
-    resultado = await buscar(text)
-    if resultado:
-        respuesta = f"{resultado['respuesta']}\n\n🔗 <a href=\"{resultado['link']}\">{resultado['titulo']}</a>"
-    else:
-        respuesta = "No encontré un documento específico sobre eso. 🤔\n\nIntenta preguntar sobre:\n📋 Mapeo sábado/domingo\n📞 Directorio o correos RDC\n🗺 Croquis u organigrama\n📄 Carta Ánimas"
-    await send_message(chat_id, respuesta)
+    try:
+        data = await req.json()
+        if "message" not in data:
+            return {"ok": True}
+        msg = data["message"]
+        chat_id = msg["chat"]["id"]
+        text = msg.get("text", "").strip()
+        if not text:
+            return {"ok": True}
+        if text in ["/start", "/inicio"]:
+            await send_message(chat_id, "👋 ¡Hola! Soy el <b>Asistente Mezontle</b>.\n\nHazme cualquier pregunta y buscaré el documento correcto para ti.\n\nPuedes preguntar sobre:\n📋 Mapeos · Directorio · Correos RDC\n🗺 Croquis · Organigrama · Carta Ánimas")
+            return {"ok": True}
+        await send_typing(chat_id)
+        resultado = await buscar(text)
+        if resultado:
+            respuesta = f"{resultado['respuesta']}\n\n🔗 <a href=\"{resultado['link']}\">{resultado['titulo']}</a>"
+        else:
+            respuesta = "No encontré un documento específico sobre eso. 🤔\n\nIntenta preguntar sobre:\n📋 Mapeo sábado/domingo\n📞 Directorio o correos RDC\n🗺 Croquis u organigrama\n📄 Carta Ánimas"
+        await send_message(chat_id, respuesta)
+    except Exception as e:
+        print(f"Error: {e}")
     return {"ok": True}
